@@ -1,0 +1,38 @@
+server:
+  port: 8081
+
+spring:
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: enrollment-processor
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: "com.uniclass.lab"
+        spring.json.value.default.type: com.uniclass.lab.EnrollmentEvent
+        spring.json.use.type.headers: false
+        max.poll.records: 100
+        session.timeout.ms: 45000
+        heartbeat.interval.ms: 3000
+    listener:
+      ack-mode: MANUAL
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info
+  endpoint:
+    health:
+      show-details: always
+
+lab:
+  concurrency: ${LAB_CONCURRENCY:3}
+  simulated-processing-ms: ${LAB_SIMULATED_PROCESSING_MS:80}

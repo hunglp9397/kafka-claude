@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+
+  # ─── Infrastructure ────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: lab-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: lab-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
+      KAFKA_LOG_RETENTION_HOURS: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # Tự động tạo topic khi kafka ready
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: lab-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Tạo topic enrollment-event với 6 partitions...' &&
+        kafka-topics --create --topic enrollment-event --partitions 6 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092 &&
+        echo 'Topic đã tạo xong!'
+      "
+
+  # Kafka UI — xem consumer lag trực quan tại http://localhost:8080
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: lab-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-lab
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
+  # ─── Spring Boot Consumer ──────────────────────────────────────────
+  consumer:
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    container_name: lab-consumer
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LAB_CONCURRENCY: 3
+      LAB_SIMULATED_PROCESSING_MS: 80
+    # Xem log consumer: docker logs -f lab-consumer
+
+  # ─── Python Producer ───────────────────────────────────────────────
+  producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    container_name: lab-producer
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    # Không tự chạy — chạy thủ công: docker compose run --rm producer python producer.py
+
+  # ─── Analyzer ─────────────────────────────────────────────────────
+  analyzer:
+    build:
+      context: ./result
+      dockerfile: Dockerfile
+    container_name: lab-analyzer
+    depends_on:
+      - consumer
+    environment:
+      CONSUMER_URL: http://consumer:8081
+    # Chạy thủ công sau khi producer xong: docker compose run --rm analyzer
