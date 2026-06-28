@@ -1,0 +1,1 @@
+Solving real Kafka problems with Claude's support
